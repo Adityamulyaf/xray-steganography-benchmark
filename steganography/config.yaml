@@ -1,0 +1,54 @@
+# Configuration for X-Ray Steganography Research Platform
+# Referensi: PRD.md & STEP.md
+
+experiment:
+  name: "xray_steganography_benchmark"
+  random_seed: 42
+  methods:
+    - "lsb"
+    - "adaptive_lsb"
+    - "dct"
+
+image_settings:
+  format: "PNG"
+  color_mode: "grayscale"
+  bit_depth: 8
+  max_dimension: 2048
+
+payload_settings:
+  # Ukuran payload sintetis dalam byte untuk pengujian
+  payload_sizes_bytes:
+    - 64
+    - 128
+    - 256
+    - 512
+    - 1024
+
+jpeg_attack_settings:
+  # Faktor kualitas kompresi JPEG untuk simulasi serangan
+  qualities:
+    - 95
+    - 90
+    - 85
+    - 80
+    - 75
+
+dct_settings:
+  block_size: 8
+  # Pasangan koefisien frekuensi menengah (mid-frequency) dalam blok 8x8
+  coeff_pair_1: [4, 3]
+  coeff_pair_2: [3, 4]
+  quantization_factor: 10.0
+
+adaptive_lsb_settings:
+  gradient_operator: "sobel"
+  texture_threshold_percentile: 60
+
+paths:
+  cover_dir: "data/cover"
+  secret_dir: "data/secret"
+  stego_dir: "outputs/stego"
+  compressed_dir: "outputs/compressed"
+  recovered_dir: "outputs/recovered"
+  results_csv: "results/experiment_results.csv"
+  figures_dir: "results/figures"
