@@ -115,15 +115,18 @@ def embed_lsb(
 
 
 def extract_lsb(
-    stego_image: np.ndarray
+    stego_image: np.ndarray,
+    expected_payload_len: Optional[int] = None
 ) -> Tuple[Optional[bytes], float, Dict[str, Any]]:
     """
     Mengekstrak payload dari Least Significant Bit (LSB) citra stego.
     Bersifat blind (tidak memerlukan citra cover referensi).
-    
+
     Args:
         stego_image: Citra stego 2D grayscale (uint8).
-        
+        expected_payload_len: Opsional, panjang payload yang diharapkan (digunakan sebagai fallback
+                              saat simulasi serangan jika header mengalami korupsi).
+
     Returns:
         Tuple[Optional[bytes], float, Dict[str, Any]]:
             - recovered_payload: Bytes data hasil ekstraksi (atau None jika header rusak/invalid).
@@ -131,17 +134,17 @@ def extract_lsb(
             - info: Metadata proses ekstraksi (status, alasan jika gagal).
     """
     start_time = time.perf_counter()
-    
+
     if stego_image is None or len(stego_image.shape) != 2:
         return None, 0.0, {
             "method": "lsb",
             "success": False,
             "error": "Citra stego tidak valid atau bukan 2D grayscale."
         }
-        
+
     stego_flat = stego_image.flatten()
     total_pixels = len(stego_flat)
-    
+
     # Periksa apakah citra memiliki cukup piksel untuk membaca header
     if total_pixels < HEADER_BITS_COUNT:
         elapsed_time = time.perf_counter() - start_time
@@ -150,57 +153,75 @@ def extract_lsb(
             "success": False,
             "error": f"Ukuran citra ({total_pixels} px) lebih kecil dari ukuran header ({HEADER_BITS_COUNT} bit)."
         }
-        
+
     # 1. Ekstrak header (32 bit pertama)
     header_bits = stego_flat[:HEADER_BITS_COUNT] & 0x01
+    payload_len = None
+    header_valid = False
     try:
         header_bytes = bits_to_bytes(header_bits)
         payload_len = int.from_bytes(header_bytes, byteorder="big", signed=False)
-    except Exception as e:
-        elapsed_time = time.perf_counter() - start_time
-        return None, elapsed_time, {
-            "method": "lsb",
-            "success": False,
-            "error": f"Gagal mendekode header: {str(e)}"
-        }
-        
-    # 2. Validasi panjang payload yang terbaca dari header
-    required_bits = HEADER_BITS_COUNT + (payload_len * 8)
+        required_bits = HEADER_BITS_COUNT + (payload_len * 8)
+        if 0 <= payload_len <= ((total_pixels - HEADER_BITS_COUNT) // 8):
+            header_valid = True
+    except Exception:
+        header_valid = False
+
+    # Jika header korupsi dan fallback expected_payload_len diberikan
+    if not header_valid:
+        if expected_payload_len is not None and expected_payload_len <= ((total_pixels - HEADER_BITS_COUNT) // 8):
+            payload_len = expected_payload_len
+            required_bits = HEADER_BITS_COUNT + (payload_len * 8)
+            payload_bits = stego_flat[HEADER_BITS_COUNT:required_bits] & 0x01
+            recovered_payload = bits_to_bytes(payload_bits)
+            elapsed_time = time.perf_counter() - start_time
+            return recovered_payload, elapsed_time, {
+                "method": "lsb",
+                "payload_bytes": len(recovered_payload),
+                "total_bits_extracted": len(payload_bits),
+                "header_valid": False,
+                "header_corrupted": True,
+                "extraction_time_seconds": elapsed_time,
+                "success": False,
+                "error": "Header korupsi akibat serangan kompresi. Menggunakan fallback expected_payload_len."
+            }
+        else:
+            elapsed_time = time.perf_counter() - start_time
+            return None, elapsed_time, {
+                "method": "lsb",
+                "success": False,
+                "error": (
+                    f"Header mengindikasikan payload {payload_len} bytes, "
+                    f"melebihi ukuran citra {total_pixels} piksel."
+                )
+            }
+
     if payload_len == 0:
         elapsed_time = time.perf_counter() - start_time
         return b"", elapsed_time, {
             "method": "lsb",
             "payload_bytes": 0,
+            "header_valid": True,
             "extraction_time_seconds": elapsed_time,
             "success": True
         }
-        
-    if required_bits > total_pixels or payload_len > (total_pixels // 8):
-        # Header kemungkinan besar rusak akibat kompresi atau stego tidak valid
-        elapsed_time = time.perf_counter() - start_time
-        return None, elapsed_time, {
-            "method": "lsb",
-            "success": False,
-            "error": (
-                f"Header mengindikasikan payload {payload_len} bytes ({required_bits} bit), "
-                f"melebihi ukuran citra {total_pixels} piksel."
-            )
-        }
-        
+
     # 3. Ekstrak bit payload
+    required_bits = HEADER_BITS_COUNT + (payload_len * 8)
     payload_bits = stego_flat[HEADER_BITS_COUNT:required_bits] & 0x01
     recovered_payload = bits_to_bytes(payload_bits)
-    
+
     elapsed_time = time.perf_counter() - start_time
-    
+
     info = {
         "method": "lsb",
         "payload_bytes": len(recovered_payload),
         "total_bits_extracted": len(payload_bits),
+        "header_valid": True,
         "extraction_time_seconds": elapsed_time,
         "success": True
     }
-    
+
     return recovered_payload, elapsed_time, info
 
 
